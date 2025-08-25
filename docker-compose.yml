@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: intelligence_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: intelligence_db
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - intelligence_network
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: intelligence_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - intelligence_network
+
+  app:
+    build: .
+    container_name: intelligence_service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URL: mongodb://admin:password@mongodb:27017/intelligence_db?authSource=admin
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+    depends_on:
+      - mongodb
+      - qdrant
+    networks:
+      - intelligence_network
+
+volumes:
+  mongodb_data:
+  qdrant_data:
+
+networks:
+  intelligence_network:
+    driver: bridge
