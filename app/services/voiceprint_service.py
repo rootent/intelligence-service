@@ -1,11 +1,16 @@
+import warnings
+
+# Suppress speechbrain deprecation warnings before imports
+warnings.filterwarnings("ignore", category=UserWarning, message=".*torchaudio._backend.list_audio_backends.*")
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*torch.cuda.amp.custom_fwd.*")
+
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from fastapi import HTTPException
-from speechbrain.pretrained import EncoderClassifier
+from speechbrain.inference.speaker import EncoderClassifier
 import torch
 import numpy as np
 import librosa
-import warnings
 import logging
 
 # Configure logging
@@ -107,7 +112,7 @@ class VoiceProcessor:
                 detail=f"Failed to preprocess audio: {str(e)}"
             )
     
-    def extract_voiceprint(self, audio_data: np.ndarray) -> np.ndarray:
+    def extract_voiceprint(self, audio_data: torch.Tensor) -> torch.Tensor:
         """
         Extract voiceprint/embedding from preprocessed audio
         
@@ -128,13 +133,19 @@ class VoiceProcessor:
             min_duration = 1.0  # 1 second minimum
             min_samples = int(min_duration * 16000)
             
-            if len(audio_data) < min_samples:
+            # Remove batch dimension if it exists for length check
+            if audio_data.dim() > 1:
+                audio_flat = audio_data.squeeze()
+            else:
+                audio_flat = audio_data
+                
+            if len(audio_flat) < min_samples:
                 # Pad with zeros if too short
-                padding = min_samples - len(audio_data)
-                audio_data = np.pad(audio_data, (0, padding), mode='constant')
+                padding = min_samples - len(audio_flat)
+                audio_flat = torch.nn.functional.pad(audio_flat, (0, padding), mode='constant')
             
-            # Convert to torch tensor and add batch dimension
-            audio_tensor = torch.from_numpy(audio_data).unsqueeze(0).float()
+            # Add batch dimension
+            audio_tensor = audio_flat.unsqueeze(0).float()
             
             # Extract embedding using SpeechBrain on CPU
             with torch.no_grad():
@@ -143,9 +154,9 @@ class VoiceProcessor:
                 embedding = self.encoder.encode_batch(audio_tensor)
                 
                 # Convert to numpy and remove batch dimension
-                voiceprint = embedding.squeeze().cpu().numpy()
+                voiceprint = embedding.squeeze().cpu()
             
-            return voiceprint.astype(np.float32)
+            return voiceprint
             
         except Exception as e:
             logger.error(f"Error extracting voiceprint: {e}")

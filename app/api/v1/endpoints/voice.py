@@ -10,6 +10,7 @@ import soundfile as sf
 import logging
 import warnings
 import uuid
+import torchaudio
 from app.services.voiceprint_service import voice_processor
 from app.services.voiceprint_service import VoiceprintResponse
 from app.services.voiceprint_qdrant_service import voiceprint_qdrant_hybrid_service
@@ -51,51 +52,36 @@ async def generate_voiceprint(audio_file: UploadFile = File(...), userId: str = 
     # Create temporary file to store uploaded audio
     temp_file = None
     try:
-        # Save uploaded file to temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as temp_file:
+        # Get file extension for proper format recognition
+        file_ext = os.path.splitext(audio_file.filename)[1].lower() if audio_file.filename else '.tmp'
+        
+        # Save uploaded file to temporary location with proper extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
             content = await audio_file.read()
             temp_file.write(content)
             temp_file_path = temp_file.name
         
-        # Load audio file with better error handling and format support
+        # Load audio file with format-specific handling
         try:
-            # Determine file extension for format-specific loading
-            file_ext = os.path.splitext(audio_file.filename)[1].lower() if audio_file.filename else ''
-            
-            # Try different loading methods based on format
-            audio_data = None
-            sample_rate = None
-            
-            # For WAV and FLAC, try soundfile first (no warnings)
-            if file_ext in ['.wav', '.flac']:
-                try:
-                    audio_data, sample_rate = sf.read(temp_file_path, always_2d=False)
-                except Exception:
-                    pass
-            
-            # If soundfile failed or for other formats, use librosa with warning suppression
-            if audio_data is None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=False)
-            
-            # Calculate duration
-            if len(audio_data.shape) == 1:
-                duration = len(audio_data) / sample_rate
+            if file_ext in ['.m4a', '.mp4', '.aac']:
+                # Use librosa for M4A/MP4/AAC files as torchaudio may not support them
+                audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=True)
+                signal = torch.from_numpy(audio_data).unsqueeze(0)
+                fs = sample_rate
             else:
-                duration = len(audio_data) / sample_rate if audio_data.shape[0] < audio_data.shape[1] else len(audio_data[0]) / sample_rate
-            
+                # Use torchaudio for other formats
+                signal, fs = torchaudio.load(temp_file_path)
         except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to load audio file. Please ensure it's a valid audio format. Supported formats: WAV, FLAC, MP3, M4A, OGG, AAC. Error: {str(e)}"
-            )
-        
-        # Preprocess audio
-        preprocessed_audio = voice_processor.preprocess_audio(audio_data, sample_rate)
+            # Fallback to librosa for all formats
+            audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=True)
+            signal = torch.from_numpy(audio_data).unsqueeze(0)
+            fs = sample_rate
+
+        # Calculate duration
+        duration = signal.shape[1] / fs
         
         # Extract voiceprint
-        voiceprint = voice_processor.extract_voiceprint(preprocessed_audio)
+        voiceprint = voice_processor.extract_voiceprint(signal)
         
         # Convert numpy array to list for JSON serialization
         voiceprint_list = voiceprint.tolist()
@@ -121,9 +107,9 @@ async def generate_voiceprint(audio_file: UploadFile = File(...), userId: str = 
             message=f"Voiceprint successfully generated from {audio_file.filename}"
         )
         
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+    # except HTTPException:
+    #     # Re-raise HTTP exceptions
+    #     raise
         
     except Exception as e:
         logger.error(f"Unexpected error processing audio file {audio_file.filename}: {e}")
@@ -167,51 +153,36 @@ async def generate_voiceprint(audio_file: UploadFile = File(...)):
     # Create temporary file to store uploaded audio
     temp_file = None
     try:
-        # Save uploaded file to temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.tmp') as temp_file:
+        # Get file extension for proper format recognition
+        file_ext = os.path.splitext(audio_file.filename)[1].lower() if audio_file.filename else '.tmp'
+        
+        # Save uploaded file to temporary location with proper extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
             content = await audio_file.read()
             temp_file.write(content)
             temp_file_path = temp_file.name
         
-        # Load audio file with better error handling and format support
+        # Load audio file with format-specific handling
         try:
-            # Determine file extension for format-specific loading
-            file_ext = os.path.splitext(audio_file.filename)[1].lower() if audio_file.filename else ''
-            
-            # Try different loading methods based on format
-            audio_data = None
-            sample_rate = None
-            
-            # For WAV and FLAC, try soundfile first (no warnings)
-            if file_ext in ['.wav', '.flac']:
-                try:
-                    audio_data, sample_rate = sf.read(temp_file_path, always_2d=False)
-                except Exception:
-                    pass
-            
-            # If soundfile failed or for other formats, use librosa with warning suppression
-            if audio_data is None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=False)
-            
-            # Calculate duration
-            if len(audio_data.shape) == 1:
-                duration = len(audio_data) / sample_rate
+            if file_ext in ['.m4a', '.mp4', '.aac']:
+                # Use librosa for M4A/MP4/AAC files as torchaudio may not support them
+                audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=True)
+                signal = torch.from_numpy(audio_data).unsqueeze(0)
+                fs = sample_rate
             else:
-                duration = len(audio_data) / sample_rate if audio_data.shape[0] < audio_data.shape[1] else len(audio_data[0]) / sample_rate
-            
+                # Use torchaudio for other formats
+                signal, fs = torchaudio.load(temp_file_path)
         except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to load audio file. Please ensure it's a valid audio format. Supported formats: WAV, FLAC, MP3, M4A, OGG, AAC. Error: {str(e)}"
-            )
-        
-        # Preprocess audio
-        preprocessed_audio = voice_processor.preprocess_audio(audio_data, sample_rate)
+            # Fallback to librosa for all formats
+            audio_data, sample_rate = librosa.load(temp_file_path, sr=None, mono=True)
+            signal = torch.from_numpy(audio_data).unsqueeze(0)
+            fs = sample_rate
+
+        # Calculate duration
+        duration = signal.shape[1] / fs
         
         # Extract voiceprint
-        voiceprint = voice_processor.extract_voiceprint(preprocessed_audio)
+        voiceprint = voice_processor.extract_voiceprint(signal)
         
         # Convert numpy array to list for JSON serialization
         voiceprint_list = voiceprint.tolist()
@@ -223,7 +194,7 @@ async def generate_voiceprint(audio_file: UploadFile = File(...)):
         
         voice_match = voiceprint_qdrant_hybrid_service.search_voice_by_voiceprint(
             voiceprint=voiceprint_list,
-            limit=2,
+            limit=1,
             score_threshold=0.1,
             name=None,
             user_id=None,
@@ -271,59 +242,3 @@ async def voiceprint_info():
         "minimum_duration": "1.0 seconds",
         "description": "Generates speaker embeddings/voiceprints for voice identification and verification"
     }
-
-@router.post("/voiceprint/compares")
-async def compare_voiceprints(voiceprint1: List[float], voiceprint2: List[float]):
-    """
-    Compare two voiceprints and return similarity score
-    
-    Args:
-        voiceprint1: First voiceprint vector
-        voiceprint2: Second voiceprint vector
-        
-    Returns:
-        Similarity score between the two voiceprints (cosine similarity)
-    """
-    try:
-        if len(voiceprint1) != len(voiceprint2):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voiceprint dimensions don't match: {len(voiceprint1)} vs {len(voiceprint2)}"
-            )
-        
-        # Convert to numpy arrays
-        v1 = np.array(voiceprint1, dtype=np.float32)
-        v2 = np.array(voiceprint2, dtype=np.float32)
-        
-        # Calculate cosine similarity
-        dot_product = np.dot(v1, v2)
-        norm_v1 = np.linalg.norm(v1)
-        norm_v2 = np.linalg.norm(v2)
-        
-        if norm_v1 == 0 or norm_v2 == 0:
-            similarity = 0.0
-        else:
-            similarity = dot_product / (norm_v1 * norm_v2)
-        
-        # Convert to Python float for JSON serialization
-        similarity = float(similarity)
-        
-        return {
-            "similarity": similarity,
-            "distance": 1.0 - similarity,
-            "match_threshold_high": 0.8,  # High confidence threshold
-            "match_threshold_medium": 0.6,  # Medium confidence threshold
-            "interpretation": (
-                "High match" if similarity > 0.8 else
-                "Medium match" if similarity > 0.6 else
-                "Low match" if similarity > 0.4 else
-                "No match"
-            )
-        }
-        
-    except Exception as e:
-        logger.error(f"Error comparing voiceprints: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to compare voiceprints: {str(e)}"
-        )
